@@ -24,6 +24,38 @@ jobs:
           xcodebuild -version
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Prepare iEnergy app icon
+        run: |
+          python3 - <<'PYICON'
+          from pathlib import Path
+          import json, struct, zlib
+          root=Path('Assets.xcassets')
+          icon=root/'AppIcon.appiconset'
+          icon.mkdir(parents=True,exist_ok=True)
+          (root/'Contents.json').write_text(json.dumps({'info':{'author':'xcode','version':1}}))
+          (icon/'Contents.json').write_text(json.dumps({'images':[{'filename':'AppIcon.png','idiom':'universal','platform':'ios','size':'1024x1024'}],'info':{'author':'xcode','version':1}}))
+          polygon=[(565,150),(300,565),(475,565),(430,875),(745,430),(560,430)]
+          def inside(x,y):
+              hit=False
+              j=len(polygon)-1
+              for i,(xi,yi) in enumerate(polygon):
+                  xj,yj=polygon[j]
+                  if (yi>y)!=(yj>y) and x<(xj-xi)*(y-yi)/(yj-yi)+xi: hit=not hit
+                  j=i
+              return hit
+          raw=bytearray()
+          for y in range(1024):
+              raw.append(0)
+              for x in range(1024):
+                  raw.extend((40,220,220) if inside(x,y) else (10,27+int(y/50),52+int(x/50)))
+          def chunk(t,d): return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+          png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1024,1024,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
+          (icon/'AppIcon.png').write_bytes(png)
+          project=Path('project.yml')
+          text=project.read_text().replace('sources: [iEnergyApp.swift]','sources: [iEnergyApp.swift, Assets.xcassets]')
+          text=text.replace('PRODUCT_BUNDLE_IDENTIFIER:','ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon\n        PRODUCT_BUNDLE_IDENTIFIER:')
+          project.write_text(text)
+          PYICON
       - name: Generate project
         run: xcodegen generate
       - name: Build for iOS simulator
@@ -55,7 +87,8 @@ jobs:
           ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
           TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
-          xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" archive
+          xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" CODE_SIGNING_ALLOWED=NO archive
+          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM_ID" ExportOptions.plist
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
       - name: Upload to TestFlight
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
