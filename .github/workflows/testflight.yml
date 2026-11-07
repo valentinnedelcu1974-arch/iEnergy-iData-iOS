@@ -80,6 +80,42 @@ jobs:
           printf '%s\n' "$API_KEY" > "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
           chmod 600 "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
           echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey_${KEY_ID}.p8" >> "$GITHUB_ENV"
+      - name: Install iEnergy distribution signing assets
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
+        env:
+          SIGNING_ASSETS: ${{ secrets.IENERGY_SIGNING_ASSETS }}
+        run: |
+          python3 - <<'PYSIGN'
+          import os, json, base64, subprocess, plistlib
+          from pathlib import Path
+          a=json.loads(os.environ['SIGNING_ASSETS'])
+          temp=Path(os.environ['RUNNER_TEMP'])
+          p12=temp/'ienergy-distribution.p12'
+          p12.write_bytes(base64.b64decode(a['p12']))
+          profile=base64.b64decode(a['profile'])
+          folder=Path.home()/'Library/MobileDevice/Provisioning Profiles'
+          folder.mkdir(parents=True,exist_ok=True)
+          (folder/(a['uuid']+'.mobileprovision')).write_bytes(profile)
+          modern=Path.home()/'Library/Developer/Xcode/UserData/Provisioning Profiles'
+          modern.mkdir(parents=True,exist_ok=True)
+          (modern/(a['uuid']+'.mobileprovision')).write_bytes(profile)
+          keychain=str(temp/'ienergy-signing.keychain-db')
+          import secrets
+          keypass=secrets.token_urlsafe(32)
+          def run(*args): subprocess.run(args,check=True,stdout=subprocess.DEVNULL)
+          run('security','create-keychain','-p',keypass,keychain)
+          run('security','set-keychain-settings','-lut','21600',keychain)
+          run('security','unlock-keychain','-p',keypass,keychain)
+          run('security','import',str(p12),'-P',a['password'],'-T','/usr/bin/codesign','-T','/usr/bin/security','-t','cert','-f','pkcs12','-k',keychain)
+          run('security','set-key-partition-list','-S','apple-tool:,apple:,codesign:','-s','-k',keypass,keychain)
+          run('security','list-keychains','-d','user','-s',keychain)
+          options={'method':'app-store-connect','destination':'export','signingStyle':'manual','teamID':'F3639777XM','signingCertificate':a['certificate_sha1'],'provisioningProfiles':{'com.ienergyidata.ios':a['name']}}
+          Path('ExportOptions.plist').write_bytes(plistlib.dumps(options))
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('IENERGY_KEYCHAIN_PATH='+keychain+'\n')
+              f.write('IENERGY_PROFILE_UUID='+a['uuid']+'\n')
+          p12.unlink()
+          PYSIGN
       - name: Archive and export signed IPA
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
         env:
@@ -88,7 +124,6 @@ jobs:
           TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" CODE_SIGNING_ALLOWED=NO archive
-          /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM_ID" ExportOptions.plist
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
       - name: Upload to TestFlight
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
@@ -102,3 +137,8 @@ jobs:
         if: always()
         run: |
           if [ -n "$APPLE_API_KEY_PATH" ]; then rm -f "$APPLE_API_KEY_PATH"; fi
+          if [ -n "$IENERGY_KEYCHAIN_PATH" ]; then security delete-keychain "$IENERGY_KEYCHAIN_PATH"; fi
+          if [ -n "$IENERGY_PROFILE_UUID" ]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IENERGY_PROFILE_UUID.mobileprovision"
+            rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$IENERGY_PROFILE_UUID.mobileprovision"
+          fi
