@@ -19,7 +19,7 @@ xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -sdk iphonesimul
 GitHub Actions generates the app icon and asset catalog before generating the Xcode project. Pushes to main build the simulator app. Simulator compilation succeeded with Xcode 26.3.
 
 ## TestFlight
-Manually run the iEnergy iOS Build and TestFlight workflow with upload_testflight enabled. The workflow archives without development signing, then uses automatic App Store distribution signing at export.
+Manually run the iEnergy iOS Build and TestFlight workflow with upload_testflight enabled. The workflow archives without development signing, then uses manual App Store distribution signing at export with the dedicated iEnergyIData_AppStore provisioning profile.
 
 Repository variables:
 - APPLE_TEAM_ID
@@ -28,7 +28,8 @@ Repository variables:
 
 Repository secret:
 - APPSTORE_API_PRIVATE_KEY
+- IENERGY_SIGNING_ASSETS (JSON containing encrypted PKCS#12 certificate, its password and the App Store provisioning profile)
 
-Never commit API private keys or signing credentials. The API key is stored as an encrypted repository secret and the temporary runner file is removed after every run.
+Never commit API private keys or signing credentials. The API key is stored as an encrypted repository secret and temporary runner key files, keychain and provisioning profiles are removed after every run.
 
 App Store Connect processing, an installable TestFlight build, device testing and App Review are separate milestones. Check the current workflow result and App Store Connect before claiming a build is available. Public release also needs final metadata, privacy answers, screenshots, age rating and review.
