@@ -1,0 +1,71 @@
+name: iEnergy iOS Build and TestFlight
+on:
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: Upload signed IPA to TestFlight
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26+
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$XCODE" || { echo 'Xcode 26+ unavailable'; exit 1; }
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build for iOS simulator
+        run: xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -resultBundlePath build-results.xcresult CODE_SIGNING_ALLOWED=NO build
+      - name: Preserve build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iEnergy-build-results
+          path: build-results.xcresult
+          if-no-files-found: ignore
+      - name: Configure App Store Connect API authentication
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
+        env:
+          API_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          test -n "$API_KEY" && test -n "$KEY_ID" && test -n "$ISSUER_ID" && test -n "$TEAM_ID"
+          mkdir -p "$HOME/private_keys"
+          printf '%s\n' "$API_KEY" > "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
+          chmod 600 "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
+          echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey_${KEY_ID}.p8" >> "$GITHUB_ENV"
+      - name: Archive and export signed IPA
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
+        env:
+          KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/iEnergyIData.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+      - name: Upload to TestFlight
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
+        uses: apple-actions/upload-testflight-build@v5
+        with:
+          app-path: ${{ runner.temp }}/export/iEnergyIData.ipa
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      - name: Remove API key
+        if: always()
+        run: |
+          if [ -n "$APPLE_API_KEY_PATH" ]; then rm -f "$APPLE_API_KEY_PATH"; fi
