@@ -1,0 +1,139 @@
+name: Temporary CallBlock Pro Signing
+on:
+  push:
+    branches: [callblock-signing-20261109]
+    paths: [.github/workflows/callblock-signing.yml]
+permissions:
+  contents: read
+concurrency:
+  group: callblock-signing
+  cancel-in-progress: false
+jobs:
+  sign-callblock:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - name: Checkout pinned CallBlock Pro source only
+        uses: actions/checkout@v4
+        with:
+          repository: valentinnedelcu1974-arch/CallBlock-Pro-iOS
+          ref: 4987d76d6f75f2033864470d62746b342ce6542a
+          persist-credentials: false
+      - name: Prepare build tools
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          brew install xcodegen
+          python3 -m venv "$RUNNER_TEMP/callblock-python"
+          "$RUNNER_TEMP/callblock-python/bin/pip" install 'PyJWT==2.10.1' 'cryptography==46.0.3'
+      - name: Validate existing key and install only CallBlock profiles
+        env:
+          SIGNING_ASSETS: ${{ secrets.IENERGY_SIGNING_ASSETS }}
+          API_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+        run: |
+          "$RUNNER_TEMP/callblock-python/bin/python" - <<'PY'
+          import os,json,base64,time,secrets,subprocess,plistlib,urllib.request,urllib.parse,urllib.error
+          from pathlib import Path
+          import jwt
+          from cryptography import x509
+          from cryptography.hazmat.primitives import hashes,serialization
+          from cryptography.hazmat.primitives.serialization import pkcs12
+          expected='8FD7EBF69C0B38C88C902A11841952AE4AD38398'
+          team='F3639777XM'
+          temp=Path(os.environ['RUNNER_TEMP'])
+          def require(ok,message):
+              if not ok: raise SystemExit(message)
+          def command(*args):
+              result=subprocess.run(args,capture_output=True)
+              require(result.returncode==0,'A signing setup command failed; credentials suppressed.')
+              return result.stdout
+          try:
+              assets=json.loads(os.environ['SIGNING_ASSETS'])
+              data=base64.b64decode(assets['p12'],validate=True)
+              password=assets['password']
+              key,certificate,chain=pkcs12.load_key_and_certificates(data,password.encode())
+          except Exception:
+              raise SystemExit('Stored signing package could not be decoded; credentials suppressed.') from None
+          require(key is not None and certificate is not None,'Private key missing from stored signing package.')
+          require(certificate.fingerprint(hashes.SHA1()).hex().upper()==expected,'Stored certificate does not match uploaded distribution.cer. No signing attempted.')
+          require(certificate.serial_number==int('6BA8CA6567E28A777AB172B95D06D45D',16),'Certificate serial mismatch.')
+          require(key.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)==certificate.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo),'Certificate and private key mismatch.')
+          print('Confirmed: existing private key matches uploaded Apple Distribution certificate.')
+          require(all(os.environ.get(k) for k in ['API_KEY','KEY_ID','ISSUER_ID']),'Apple API configuration missing.')
+          token=jwt.encode({'iss':os.environ['ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+900,'aud':'appstoreconnect-v1'},os.environ['API_KEY'],algorithm='ES256',headers={'kid':os.environ['KEY_ID'],'typ':'JWT'})
+          profiles={'com.callblockpro.app':'CallBlockPro_AppStore','com.callblockpro.app.directory':'CallBlockPro_CallDirectory_AppStore'}
+          installed=[]
+          for bundle,name in profiles.items():
+              query=urllib.parse.urlencode({'filter[name]':name,'filter[profileState]':'ACTIVE','filter[profileType]':'IOS_APP_STORE','limit':'20'})
+              request=urllib.request.Request('https://api.appstoreconnect.apple.com/v1/profiles?'+query,headers={'Authorization':'Bearer '+token})
+              try:
+                  with urllib.request.urlopen(request,timeout=45) as response: results=json.load(response)['data']
+              except urllib.error.HTTPError as error:
+                  raise SystemExit('Apple profile download failed with HTTP '+str(error.code)+'. Credentials suppressed.') from None
+              matches=[p for p in results if p['attributes']['name']==name]
+              require(len(matches)==1,'Expected exactly one active profile: '+name)
+              raw=base64.b64decode(matches[0]['attributes']['profileContent'])
+              path=temp/(name+'.mobileprovision')
+              path.write_bytes(raw)
+              profile=plistlib.loads(command('security','cms','-D','-i',str(path)))
+              ent=profile['Entitlements']
+              require(ent.get('application-identifier')==team+'.'+bundle,'Profile bundle identifier mismatch.')
+              require(profile.get('TeamIdentifier')==[team],'Profile team mismatch.')
+              require(ent.get('get-task-allow') is False,'Profile is not for distribution.')
+              require('group.com.callblockpro.shared' in ent.get('com.apple.security.application-groups',[]),'Shared App Group missing.')
+              require(any(x509.load_der_x509_certificate(c).fingerprint(hashes.SHA1()).hex().upper()==expected for c in profile['DeveloperCertificates']),'Profile signing certificate mismatch.')
+              for directory in [Path.home()/'Library/MobileDevice/Provisioning Profiles',Path.home()/'Library/Developer/Xcode/UserData/Provisioning Profiles']:
+                  directory.mkdir(parents=True,exist_ok=True)
+                  target=directory/(profile['UUID']+'.mobileprovision')
+                  target.write_bytes(raw)
+                  installed.append(str(target))
+              print('Validated profile: '+name+'; bundle and shared App Group match.')
+          keychain=str(temp/'callblock-signing.keychain-db')
+          keypass=secrets.token_urlsafe(32)
+          command('security','create-keychain','-p',keypass,keychain)
+          command('security','set-keychain-settings','-lut','1800',keychain)
+          command('security','unlock-keychain','-p',keypass,keychain)
+          p12=temp/'callblock-distribution.p12'
+          p12.write_bytes(data)
+          p12.chmod(0o600)
+          command('security','import',str(p12),'-P',password,'-T','/usr/bin/codesign','-T','/usr/bin/security','-t','cert','-f','pkcs12','-k',keychain)
+          command('security','set-key-partition-list','-S','apple-tool:,apple:,codesign:','-s','-k',keypass,keychain)
+          command('security','list-keychains','-d','user','-s',keychain)
+          p12.unlink()
+          (temp/'callblock-profile-paths.json').write_text(json.dumps(installed))
+          options={'method':'app-store-connect','destination':'export','signingStyle':'manual','teamID':team,'signingCertificate':expected,'provisioningProfiles':profiles}
+          Path('ExportOptions.plist').write_bytes(plistlib.dumps(options))
+          PY
+      - name: Archive and export CallBlock Pro only
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild -project CallBlockPro.xcodeproj -scheme CallBlockPro -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/CallBlockPro.xcarchive" CURRENT_PROJECT_VERSION=1 archive > "$RUNNER_TEMP/callblock-archive.log" 2>&1 || { tail -100 "$RUNNER_TEMP/callblock-archive.log"; exit 1; }
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/CallBlockPro.xcarchive" -exportPath "$RUNNER_TEMP/callblock-export" -exportOptionsPlist ExportOptions.plist > "$RUNNER_TEMP/callblock-export.log" 2>&1 || { tail -100 "$RUNNER_TEMP/callblock-export.log"; exit 1; }
+          test -f "$RUNNER_TEMP/callblock-export/CallBlockPro.ipa"
+          codesign --verify --deep --strict "$RUNNER_TEMP/CallBlockPro.xcarchive/Products/Applications/CallBlockPro.app"
+          echo 'CallBlock Pro 1.1 (1) archive and embedded extension signed and verified.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve signed CallBlock IPA only
+        uses: actions/upload-artifact@v4
+        with:
+          name: CallBlockPro-1.1-1-signed
+          path: ${{ runner.temp }}/callblock-export/CallBlockPro.ipa
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/callblock-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/callblock-distribution.p12"
+          python3 - <<'CLEAN'
+          import json,os
+          from pathlib import Path
+          manifest=Path(os.environ['RUNNER_TEMP'])/'callblock-profile-paths.json'
+          if manifest.exists():
+              for path in json.loads(manifest.read_text()): Path(path).unlink(missing_ok=True)
+              manifest.unlink()
+          CLEAN
