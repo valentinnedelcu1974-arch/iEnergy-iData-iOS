@@ -1,0 +1,35 @@
+name: CallBlock Apple upload status
+on:
+  push:
+    branches: [callblock-signing-20261109]
+    paths: [.github/workflows/callblock-status.yml]
+permissions:
+  contents: read
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m venv /tmp/callblock-status && /tmp/callblock-status/bin/pip install 'PyJWT==2.10.1' 'cryptography==46.0.3'
+      - name: Read only CallBlock build processing metadata
+        env:
+          API_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+        run: |
+          /tmp/callblock-status/bin/python - <<'PY'
+          import os,json,time,urllib.request,urllib.error
+          import jwt
+          token=jwt.encode({'iss':os.environ['ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+300,'aud':'appstoreconnect-v1'},os.environ['API_KEY'],algorithm='ES256',headers={'kid':os.environ['KEY_ID']})
+          for label,path in [('uploads','/v1/apps/6832368460/buildUploads?limit=10'),('builds','/v1/builds?filter%5Bapp%5D=6832368460&limit=10')]:
+              req=urllib.request.Request('https://api.appstoreconnect.apple.com'+path,headers={'Authorization':'Bearer '+token})
+              try:
+                  with urllib.request.urlopen(req,timeout=45) as response: result=json.load(response)
+              except urllib.error.HTTPError as error:
+                  print(label+' HTTP '+str(error.code)); continue
+              for item in result.get('data',[]):
+                  a=item.get('attributes',{})
+                  public={k:a[k] for k in ['cfBundleVersion','cfBundleShortVersionString','state','processingState','version','uploadedDate'] if k in a}
+                  print(label+': '+json.dumps({'id':item['id'],'attributes':public}))
+              if not result.get('data'): print(label+': none visible yet')
+          PY
