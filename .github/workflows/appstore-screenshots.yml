@@ -1,0 +1,56 @@
+name: iEnergy Build 6 Real Screenshots
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/appstore-screenshots.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2c261b09b0f983feedefc982edbab146c172e3f2
+      - name: Select Xcode 26
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build unchanged Build 6 source for simulator
+        run: |
+          xcodegen generate
+          xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/derived" CURRENT_PROJECT_VERSION=6 CODE_SIGNING_ALLOWED=NO build
+      - name: Launch app and capture real iPhone screen
+        run: |
+          python3 - <<'PY'
+          import json,subprocess,os,time
+          from pathlib import Path
+          def run(*a): return subprocess.check_output(a,text=True).strip()
+          types=json.loads(run('xcrun','simctl','list','devicetypes','-j'))['devicetypes']
+          selected=next((x for x in types if x['name']=='iPhone 16'),None)
+          if selected is None: selected=next(x for x in types if x['name']=='iPhone 15')
+          runtimes=json.loads(run('xcrun','simctl','list','runtimes','-j'))['runtimes']
+          runtime=next(x for x in reversed(runtimes) if x.get('isAvailable') and x['name'].startswith('iOS'))
+          device=run('xcrun','simctl','create','iEnergy Build 6 Screenshot',selected['identifier'],runtime['identifier'])
+          run('xcrun','simctl','boot',device)
+          run('xcrun','simctl','bootstatus',device,'-b')
+          run('xcrun','simctl','status_bar',device,'override','--time','9:41','--dataNetwork','wifi','--wifiMode','active','--wifiBars','3','--batteryState','charged','--batteryLevel','100')
+          app=str(Path(os.environ['RUNNER_TEMP'])/'derived/Build/Products/Release-iphonesimulator/iEnergyIData.app')
+          run('xcrun','simctl','install',device,app)
+          run('xcrun','simctl','ui',device,'appearance','light')
+          run('xcrun','simctl','launch',device,'com.ienergyidata.ios')
+          time.sleep(45)
+          Path('appstore-screenshots').mkdir()
+          run('xcrun','simctl','io',device,'screenshot','appstore-screenshots/iEnergy-iPhone-Build6.png')
+          Path('appstore-screenshots/provenance.txt').write_text('Real iOS Simulator screenshot from app source 2c261b09b0f983feedefc982edbab146c172e3f2. Bundle com.ienergyidata.ios; version 1.0.0, build 6. No generated or composited UI. Live website content. Device: '+selected['name']+'; runtime: '+runtime['name'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iEnergy-Build6-Real-iPhone-Screenshot
+          path: appstore-screenshots/
+          if-no-files-found: error
