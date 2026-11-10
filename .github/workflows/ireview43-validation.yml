@@ -1,0 +1,53 @@
+name: iReview43 Build 8 validation
+on:
+  push:
+    branches: [work/ireview43-build8]
+    paths: ['iReview43_Build8_ValidatedIdentity.zip', '.github/workflows/ireview43-validation.yml']
+  pull_request:
+    paths: ['iReview43_Build8_ValidatedIdentity.zip', '.github/workflows/ireview43-validation.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-validation:
+    runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: iReview43
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract isolated candidate
+        working-directory: .
+        run: unzip -oq iReview43_Build8_ValidatedIdentity.zip
+      - name: Record Xcode version
+        run: xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Source and calculation checks
+        run: |
+          python3 -m venv "$RUNNER_TEMP/qa-python"
+          "$RUNNER_TEMP/qa-python/bin/pip" install Pillow
+          "$RUNNER_TEMP/qa-python/bin/python" QA/check_source.py
+          swiftc -parse-as-library Sources/EnergyMath.swift QA/energy_math_test.swift -o "$RUNNER_TEMP/energy-math"
+          "$RUNNER_TEMP/energy-math"
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build iPhone simulator app
+        run: |
+          set -o pipefail
+          xcodebuild -project iReview43.xcodeproj -scheme iReview43 -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build -resultBundlePath build.xcresult CODE_SIGNING_ALLOWED=NO build | tee build.log
+      - name: Test native flows and capture actual app screens
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
+          xcodebuild -project iReview43.xcodeproj -scheme iReview43 -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath native-tests.xcresult CODE_SIGNING_ALLOWED=NO test | tee native-tests.log
+      - name: Preserve diagnostics and genuine screenshot attachments
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iReview43-Build8-validation
+          path: |
+            iReview43/*.log
+            iReview43/*.xcresult
+          if-no-files-found: warn
