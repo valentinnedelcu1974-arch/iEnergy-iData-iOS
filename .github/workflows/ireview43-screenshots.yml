@@ -1,0 +1,49 @@
+name: iReview43 genuine Pro Max screenshots
+'on':
+  push:
+    branches:
+    - work/ireview43-build8
+    paths:
+    - .github/workflows/ireview43-screenshots.yml
+  workflow_dispatch: null
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    defaults:
+      run:
+        shell: bash
+        working-directory: iReview43
+    steps:
+    - uses: actions/checkout@v4
+    - name: Extract validated Build 8
+      working-directory: .
+      run: unzip -oq iReview43_Build8_ValidatedIdentity.zip
+    - name: Generate project
+      run: |-
+        xcodebuild -version
+        brew install xcodegen
+        xcodegen generate
+    - name: Capture real 6.9 inch app screens
+      run: |
+        set -o pipefail
+        DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"]=="iPhone 16 Pro Max"))')
+        xcrun simctl boot "$DEVICE" || true
+        xcrun simctl bootstatus "$DEVICE" -b
+        xcodebuild -project iReview43.xcodeproj -scheme iReview43 -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -resultBundlePath appstore-screens.xcresult CODE_SIGNING_ALLOWED=NO test | tee appstore-screens.log
+    - name: Export original attachments
+      if: always()
+      run: if [ -d appstore-screens.xcresult ]; then xcrun xcresulttool export attachments --path appstore-screens.xcresult
+        --output-path appstore-screens; fi
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: iReview43-Build8-AppStore-ProMax
+        path: |-
+          iReview43/appstore-screens
+          iReview43/appstore-screens.log
+        if-no-files-found: warn
