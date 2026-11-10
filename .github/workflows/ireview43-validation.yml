@@ -40,9 +40,14 @@ jobs:
       run: |
         set -o pipefail
         DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
-        xcodebuild -project iReview43.xcodeproj -scheme iReview43 -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath native-tests.xcresult CODE_SIGNING_ALLOWED=NO test | tee native-tests.log
+        xcrun simctl boot "$DEVICE" || true
+        xcrun simctl bootstatus "$DEVICE" -b
+        xcodebuild -project iReview43.xcodeproj -scheme iReview43 -derivedDataPath build -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath native-tests.xcresult CODE_SIGNING_ALLOWED=NO test | tee native-tests.log
+      timeout-minutes: 20
     - name: Export genuine screenshot attachments
-      run: xcrun xcresulttool export attachments --path native-tests.xcresult --output-path screenshots
+      run: if [ -d native-tests.xcresult ]; then xcrun xcresulttool export attachments --path native-tests.xcresult --output-path
+        screenshots; fi
+      if: always()
     - name: Preserve diagnostics and genuine screenshot attachments
       if: always()
       uses: actions/upload-artifact@v4
@@ -149,4 +154,4 @@ jobs:
   workflow_dispatch: null
 concurrency:
   group: ireview43-build8-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
