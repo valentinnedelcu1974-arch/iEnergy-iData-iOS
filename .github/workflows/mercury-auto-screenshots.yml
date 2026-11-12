@@ -1,5 +1,12 @@
 name: Mercury Auto real screenshots
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      devices:
+        description: Devices to capture
+        type: choice
+        options: [all, iphone, ipad]
+        default: all
 permissions:
   contents: read
 jobs:
@@ -20,6 +27,7 @@ jobs:
       - run: python -m pip install cryptography PyJWT
       - name: Capture only genuine simulator screens
         env:
+          CAPTURE_DEVICES: ${{ inputs.devices }}
           ASSETS: ${{ secrets.IENERGY_SIGNING_ASSETS }}
         run: python mercury_auto_screenshots.py
       - uses: actions/upload-artifact@v4
