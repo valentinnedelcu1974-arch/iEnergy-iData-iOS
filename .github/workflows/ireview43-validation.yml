@@ -1,4 +1,4 @@
-name: iReview43 Build 8 validation
+name: iReview43 Build 9 validation
 permissions:
   contents: read
 jobs:
@@ -11,9 +11,9 @@ jobs:
         shell: bash
     steps:
     - uses: actions/checkout@v4
-    - name: Extract isolated candidate
+    - name: Extract isolated Build 9 source
       working-directory: .
-      run: unzip -oq iReview43_Build8_ValidatedIdentity.zip
+      run: unzip -oq iReview43_Build9_Source_Candidate.zip -x ".github/*"
     - name: Verify pinned macOS Intel and Xcode toolchain
       run: |
         test -d "$DEVELOPER_DIR"
@@ -30,6 +30,8 @@ jobs:
         "$RUNNER_TEMP/qa-python/bin/python" QA/check_source.py
         swiftc -parse-as-library Sources/EnergyMath.swift QA/energy_math_test.swift -o "$RUNNER_TEMP/energy-math"
         "$RUNNER_TEMP/energy-math"
+        swiftc -parse-as-library Sources/DispatchStudy.swift QA/dispatch_math_test.swift -o "$RUNNER_TEMP/dispatch-math"
+        "$RUNNER_TEMP/dispatch-math"
     - name: Generate Xcode project
       run: xcodegen generate
     - name: Build iPhone simulator app
@@ -52,106 +54,27 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: iReview43-Build8-validation
+        name: iReview43-Build9-validation
         path: |-
           iReview43/*.log
           iReview43/*.xcresult
 
           iReview43/screenshots
         if-no-files-found: warn
-    - name: Configure App Store Connect API authentication
-      env:
-        API_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
-        KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
-        ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
-        TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-      run: |
-        test -n "$API_KEY" && test -n "$KEY_ID" && test -n "$ISSUER_ID" && test -n "$TEAM_ID"
-        mkdir -p "$HOME/private_keys"
-        printf '%s\n' "$API_KEY" > "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
-        chmod 600 "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
-        echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey_${KEY_ID}.p8" >> "$GITHUB_ENV"
-      if: github.event_name == 'push' && github.ref == 'refs/heads/work/ireview43-build8'
-    - name: Install iEnergy distribution signing assets
-      env:
-        SIGNING_ASSETS: ${{ secrets.IENERGY_SIGNING_ASSETS }}
-      run: |
-        python3 - <<'PYSIGN'
-        import os, json, base64, subprocess, plistlib
-        from pathlib import Path
-        a=json.loads(os.environ['SIGNING_ASSETS'])
-        temp=Path(os.environ['RUNNER_TEMP'])
-        p12=temp/'ienergy-distribution.p12'
-        p12.write_bytes(base64.b64decode(a['p12']))
-        profile=base64.b64decode(a['profile'])
-        from datetime import datetime, timezone
-        metadata=plistlib.loads(subprocess.check_output(['security','cms','-D'],input=profile))
-        assert metadata['Entitlements']['application-identifier']=='F3639777XM.com.ienergyidata.ios', 'Wrong provisioning identity'
-        assert metadata['ExpirationDate'] > datetime.now(timezone.utc).replace(tzinfo=None), 'Expired provisioning profile'
-        folder=Path.home()/'Library/MobileDevice/Provisioning Profiles'
-        folder.mkdir(parents=True,exist_ok=True)
-        (folder/(a['uuid']+'.mobileprovision')).write_bytes(profile)
-        modern=Path.home()/'Library/Developer/Xcode/UserData/Provisioning Profiles'
-        modern.mkdir(parents=True,exist_ok=True)
-        (modern/(a['uuid']+'.mobileprovision')).write_bytes(profile)
-        keychain=str(temp/'ienergy-signing.keychain-db')
-        import secrets
-        keypass=secrets.token_urlsafe(32)
-        def run(*args): subprocess.run(args,check=True,stdout=subprocess.DEVNULL)
-        run('security','create-keychain','-p',keypass,keychain)
-        run('security','set-keychain-settings','-lut','21600',keychain)
-        run('security','unlock-keychain','-p',keypass,keychain)
-        run('security','import',str(p12),'-P',a['password'],'-T','/usr/bin/codesign','-T','/usr/bin/security','-t','cert','-f','pkcs12','-k',keychain)
-        run('security','set-key-partition-list','-S','apple-tool:,apple:,codesign:','-s','-k',keypass,keychain)
-        run('security','list-keychains','-d','user','-s',keychain)
-        options={'method':'app-store-connect','destination':'export','signingStyle':'manual','teamID':'F3639777XM','signingCertificate':a['certificate_sha1'],'provisioningProfiles':{'com.ienergyidata.ios':a['name']}}
-        Path('ExportOptions.plist').write_bytes(plistlib.dumps(options))
-        with open(os.environ['GITHUB_ENV'],'a') as f:
-            f.write('IENERGY_KEYCHAIN_PATH='+keychain+'\n')
-            f.write('IENERGY_PROFILE_UUID='+a['uuid']+'\n')
-        p12.unlink()
-        PYSIGN
-      if: github.event_name == 'push' && github.ref == 'refs/heads/work/ireview43-build8'
-    - name: Archive and export signed IPA
-      env:
-        KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
-        ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
-        TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-      run: |
-        xcodebuild -project iReview43.xcodeproj -scheme iReview43 -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/iReview43.xcarchive" -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION=8 MARKETING_VERSION=1.0 CODE_SIGNING_ALLOWED=NO archive
-        xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/iReview43.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
-      if: github.event_name == 'push' && github.ref == 'refs/heads/work/ireview43-build8'
-    - name: Upload to TestFlight
-      uses: apple-actions/upload-testflight-build@v5
-      with:
-        app-path: ${{ runner.temp }}/export/iReview43.ipa
-        issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
-        api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
-        api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
-      if: github.event_name == 'push' && github.ref == 'refs/heads/work/ireview43-build8'
-    - name: Remove API key
-      run: |
-        if [ -n "$APPLE_API_KEY_PATH" ]; then rm -f "$APPLE_API_KEY_PATH"; fi
-        if [ -n "$IENERGY_KEYCHAIN_PATH" ]; then security delete-keychain "$IENERGY_KEYCHAIN_PATH"; fi
-        if [ -n "$IENERGY_PROFILE_UUID" ]; then
-          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IENERGY_PROFILE_UUID.mobileprovision"
-          rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$IENERGY_PROFILE_UUID.mobileprovision"
-        fi
-      if: always()
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 'on':
   push:
     branches:
-    - work/ireview43-build8
+    - fix/ireview43-apple-review
     paths:
-    - iReview43_Build8_ValidatedIdentity.zip
+    - iReview43_Build9_Source_Candidate.zip
     - .github/workflows/ireview43-validation.yml
   pull_request:
     paths:
-    - iReview43_Build8_ValidatedIdentity.zip
+    - iReview43_Build9_Source_Candidate.zip
     - .github/workflows/ireview43-validation.yml
   workflow_dispatch: null
 concurrency:
-  group: ireview43-build8-${{ github.ref }}
+  group: ireview43-build9-${{ github.ref }}
   cancel-in-progress: false
