@@ -64,7 +64,11 @@ with tempfile.TemporaryDirectory(prefix='mercury-auto-') as directory:
   ipa=list(export.glob('*.ipa'));assert len(ipa)==1,'IPA missing'
   out=Path.cwd()/'mercury_auto_output';out.mkdir(exist_ok=True);shutil.copy2(ipa[0],out/'MercuryAuto.ipa')
   apiFolder=root/'private_keys';apiFolder.mkdir();apiPath=apiFolder/('AuthKey_'+os.environ['KEY_ID']+'.p8');apiPath.write_text(os.environ['API_KEY']);apiPath.chmod(0o600)
-  run('xcrun','altool','--upload-app','--type','ios','--file',str(ipa[0]),'--apiKey',os.environ['KEY_ID'],'--apiIssuer',os.environ['ISSUER_ID'],cwd=root)
+  upload=subprocess.run(['xcrun','altool','--upload-app','--type','ios','--file',str(ipa[0]),'--apiKey',os.environ['KEY_ID'],'--apiIssuer',os.environ['ISSUER_ID']],cwd=root,capture_output=True,text=True)
+  uploadLog=upload.stdout+'\n'+upload.stderr
+  print(uploadLog)
+  if upload.returncode or 'UPLOAD FAILED' in uploadLog or 'Validation failed' in uploadLog or 'UPLOAD SUCCEEDED' not in uploadLog:
+   raise RuntimeError('Apple upload was not confirmed successful; inspect validation output')
   print('Mercury Auto signed IPA uploaded. Apple processing still required.')
  finally:
   subprocess.run(['security','delete-keychain',str(keychain)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
