@@ -2,10 +2,11 @@ import shutil,os,json,base64,tempfile,subprocess,urllib.request,zipfile,io,plist
 from pathlib import Path
 import jwt
 from cryptography.hazmat.primitives.serialization import pkcs12
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 assets=json.loads(os.environ['ASSETS'])
+print('::add-mask::'+assets['password'])
 key,cert,_=pkcs12.load_key_and_certificates(base64.b64decode(assets['p12']),assets['password'].encode())
 sealed=json.loads(Path('mercury_auto_source.sealed.json').read_text())
 aes=key.decrypt(base64.b64decode(sealed['key']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
@@ -35,17 +36,24 @@ with tempfile.TemporaryDirectory(prefix='mercury-auto-') as directory:
  from cryptography import x509
  assert any(x509.load_der_x509_certificate(c).fingerprint(hashes.SHA256())==cert.fingerprint(hashes.SHA256()) for c in details['DeveloperCertificates']),'Certificate/profile mismatch'
  profileuuid=details['UUID']; installed=[]; keychain=root/'signing.keychain-db'; keypass=base64.b64encode(os.urandom(32)).decode()
- def run(*args,**kwargs):subprocess.run(args,check=True,**kwargs)
+ def run(*args,**kwargs):
+  result=subprocess.run(args,**kwargs)
+  if result.returncode: raise RuntimeError('Command failed: '+args[0]+' (exit '+str(result.returncode)+')')
  try:
   for folder in [Path.home()/'Library/MobileDevice/Provisioning Profiles',Path.home()/'Library/Developer/Xcode/UserData/Provisioning Profiles']:
    folder.mkdir(parents=True,exist_ok=True);target=folder/(profileuuid+'.mobileprovision')
    assert not target.exists(),'Profile already exists on runner'
    target.write_bytes(profile);installed.append(target)
-  p12=root/'distribution.p12';p12.write_bytes(base64.b64decode(assets['p12']));p12.chmod(0o600)
+  # Re-encode only the temporary runner copy for macOS Keychain compatibility.
+  temporaryP12Password=base64.b64encode(os.urandom(32)).decode()
+  print('::add-mask::'+temporaryP12Password)
+  print('::add-mask::'+keypass)
+  encryption=(serialization.PrivateFormat.PKCS12.encryption_builder().kdf_rounds(50000).key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC).hmac_hash(hashes.SHA1()).build(temporaryP12Password.encode()))
+  p12=root/'distribution.p12';p12.write_bytes(pkcs12.serialize_key_and_certificates(b'Mercury Auto Distribution',key,cert,None,encryption));p12.chmod(0o600)
   run('security','create-keychain','-p',keypass,str(keychain),stdout=subprocess.DEVNULL)
   run('security','unlock-keychain','-p',keypass,str(keychain),stdout=subprocess.DEVNULL)
   run('security','set-keychain-settings','-lut','21600',str(keychain),stdout=subprocess.DEVNULL)
-  run('security','import',str(p12),'-k',str(keychain),'-P',assets['password'],'-T','/usr/bin/codesign','-T','/usr/bin/security',stdout=subprocess.DEVNULL)
+  run('security','import',str(p12),'-k',str(keychain),'-P',temporaryP12Password,'-T','/usr/bin/codesign','-T','/usr/bin/security',stdout=subprocess.DEVNULL)
   run('security','set-key-partition-list','-S','apple-tool:,apple:,codesign:','-s','-k',keypass,str(keychain),stdout=subprocess.DEVNULL)
   run('security','list-keychains','-d','user','-s',str(keychain))
   run('python3','build_assets.py',cwd=project);run('xcodegen','generate',cwd=project)
