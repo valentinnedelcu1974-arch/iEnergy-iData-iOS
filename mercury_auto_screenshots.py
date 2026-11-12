@@ -26,12 +26,16 @@ with tempfile.TemporaryDirectory(prefix='mercury-auto-') as directory:
  run('xcodebuild','-project','MercuryAuto.xcodeproj','-scheme','MercuryAuto','-configuration','Debug','-sdk','iphonesimulator','-destination','generic/platform=iOS Simulator','-derivedDataPath',str(derived),'CODE_SIGNING_ALLOWED=NO','build',cwd=project)
  devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))['devices']
  available=[d for runtime,items in devices.items() if 'iOS' in runtime for d in items if d.get('isAvailable')]
- phones=[d for d in available if 'iPhone' in d['name'] and 'Pro Max' in d['name']]
+ phones=[d for d in available if 'iPhone' in d['name'] and 'Pro' in d['name'] and 'Max' not in d['name']]
  tablets=[d for d in available if 'iPad Pro' in d['name'] and '13-inch' in d['name']]
  assert phones and tablets,'Required large iPhone/iPad simulators not available'
  output=Path.cwd()/'mercury_auto_screenshots';output.mkdir(exist_ok=True)
  manifest=[]
- for kind,device in [('iPhone',phones[-1]),('iPad',tablets[-1])]:
+ chosen=[('iPhone',phones[-1]),('iPad',tablets[-1])]
+ mode=os.environ.get('CAPTURE_DEVICES','all')
+ if mode=='iphone': chosen=chosen[:1]
+ elif mode=='ipad': chosen=chosen[1:]
+ for kind,device in chosen:
   uid=device['udid']
   if device['state']!='Booted': run('xcrun','simctl','boot',uid)
   run('xcrun','simctl','bootstatus',uid,'-b')
