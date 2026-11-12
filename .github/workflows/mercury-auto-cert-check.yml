@@ -1,20 +1,33 @@
-name: Mercury Auto certificate check
+name: Mercury Auto signed TestFlight
 on: workflow_dispatch
 permissions:
   contents: read
 jobs:
-  verify:
-    runs-on: ubuntu-latest
+  deploy:
+    runs-on: macos-15
+    timeout-minutes: 45
     steps:
-      - run: python3 -m pip install cryptography
-      - name: Export public encryption key only
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+      - run: brew install xcodegen
+      - name: Prepare Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mercury-python"
+          "$RUNNER_TEMP/mercury-python/bin/pip" install cryptography PyJWT
+      - name: Sign and upload exclusively to Apple TestFlight
         env:
           ASSETS: ${{ secrets.IENERGY_SIGNING_ASSETS }}
+          API_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
         run: |
-          python3 - <<'PY'
-          import os,json,base64
-          from cryptography.hazmat.primitives.serialization import pkcs12,Encoding,PublicFormat
-          a=json.loads(os.environ['ASSETS'])
-          _,cert,_=pkcs12.load_key_and_certificates(base64.b64decode(a['p12']),a['password'].encode())
-          print('MERCURY_PUBLIC_KEY='+base64.b64encode(cert.public_key().public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo)).decode())
-          PY
+          export BUILD_NUMBER=$((100 + GITHUB_RUN_NUMBER))
+          "$RUNNER_TEMP/mercury-python/bin/python" mercury_auto_deploy.py
+      - name: Remove local IPA copy
+        if: always()
+        run: rm -rf mercury_auto_output
