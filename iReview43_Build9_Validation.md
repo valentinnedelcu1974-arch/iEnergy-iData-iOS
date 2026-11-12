@@ -1,6 +1,6 @@
 # iReview43 Build 9 — verified progress, 13 November 2026
 
-App Store Connect: 6831976341. Bundle ID: com.ienergyidata.ios. Branch: fix/ireview43-apple-review. Source archive commit: 9abedca698e302e2510e9c25e2605b4280b8b42e. Main/Mercury Auto unchanged.
+App Store Connect: 6831976341. Bundle ID: com.ienergyidata.ios. Branch: fix/ireview43-apple-review. Final source archive commit: a8775f74b5e530514b0e2d87f2df644d5c005409. Main/Mercury Auto unchanged.
 
 ## Implemented
 
@@ -13,19 +13,19 @@ App Store Connect: 6831976341. Bundle ID: com.ienergyidata.ios. Branch: fix/irev
 
 ## Validation evidence
 
-GitHub Actions run: https://github.com/valentinnedelcu1974-arch/iEnergy-iData-iOS/actions/runs/43317855812
+GitHub Actions run: https://github.com/valentinnedelcu1974-arch/iEnergy-iData-iOS/actions/runs/43319968694
 
 macOS 15 Intel, Xcode 26.3. Source/icon checks passed. Energy-balance and dispatch-model tests passed, including hourly AC balance, stored-energy balance, zero/full/empty capacity cases, AC power rating, export cap, disabled storage, nonfinite input handling and CSV row count. Xcode iOS simulator build passed.
 
-NativeFlowTests/testNativeFlows passed with 0 failures in 74.875 seconds. The UI flow exercised request creation, saved-request persistence after app relaunch, Energy Lab/Dispatch Study navigation and PV slider response, checklist toggle/reset, free-app notice, request deletion and screenshot attachments. This does not constitute physical-iPhone or external beta testing, and does not exhaustively test CSV destination handling or study save/restore.
+Final NativeFlowTests/testNativeFlows passed with 0 failures in 396.110 seconds. The slower run logged UI automation idle-notification delays during text entry; it is not a responsiveness benchmark and physical-device checks remain necessary. The UI flow exercised request creation, saved-request persistence after app relaunch, Energy Lab/Dispatch Study navigation and PV slider response, checklist toggle/reset, free-app notice, request deletion and screenshot attachments. This does not constitute physical-iPhone or external beta testing, and does not exhaustively test CSV destination handling or study save/restore.
 
-Run 43317372163 compiled the earlier source and passed model checks; it was intentionally cancelled after source replacement. It is not the final validation run.
+Run 43317855812 passed the earlier privacy/version-corrected source at 9abedca (UI flow: 0 failures, 74.875 seconds). A clipped Home subtitle was then found in its genuine screenshot and corrected at a8775f7; run 43319968694 validates that final source. Run 43317372163 was intentionally cancelled after source replacement.
 
 ## Verified comparison with iStar source
 
 The current iStar-iOS main source package was inspected read-only. Both projects use Apple SwiftUI/Foundation/UniformTypeIdentifiers and native sharing/file-export mechanisms. iReview43 additionally uses Apple Charts. No external package dependency is declared in the inspected XcodeGen projects. Eight Swift source files were compared in each package: no byte-identical Swift file. Icons differ by SHA-256 and visual design. This does not prove that no common boilerplate or snippets exist.
 
-iStar's concrete models concern dossiers, tagged assets, test status, evidence notes, punch items, dated milestones and JSON archive/report exchange. iReview43's concrete model added here concerns hourly PV, load, battery power, stored MWh, grid exchange and curtailment. The generic project/checklist areas still overlap in broad domain. No certification of a complete account-wide binary/code audit is made. GRID MANAGEMENT PRO source was not found among the currently accessible repositories; its support repository alone is insufficient for code comparison.
+iStar's concrete models concern dossiers, tagged assets, test status, evidence notes, punch items, dated milestones and JSON archive/report exchange. iReview43's concrete model added here concerns hourly PV, load, battery power, stored MWh, grid exchange and curtailment. The generic project/checklist areas still overlap in broad domain. No certification of a complete account-wide binary/code audit is made. A historical GRID MANAGEMENT PRO source snapshot, GridManagementProApp.swift version 1 last modified 15 October 2026, was subsequently read in full from the project files. It contains standards references, a balanced three-phase current estimate, local planning tasks, a generic commissioning checklist and StoreKit prototype UI; it contains no integrated 24-hour PV/BESS model or hourly CSV study. Generic checklist/planning concepts and standard SwiftUI patterns overlap. This dated snapshot is not verified as the currently shipped GRID MANAGEMENT PRO binary, so the current-version comparison remains open.
 
 ## Apple's nine questions — response preparation status
 

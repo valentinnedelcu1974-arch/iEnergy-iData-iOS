@@ -16,11 +16,11 @@ The intended users are electrical/renewable-energy engineers, commissioning and 
 
 The concrete workflow added in Build 9 combines constrained 24-hour storage calculations, an explicit no-storage comparison, accessible hourly values, local scenario retention and CSV output in the existing app. This replaces the earlier Energy Lab's static instantaneous power sliders. All assumptions and comparison limits are visible, including the effect of initial stored energy and the absence of an equal-final-SOC requirement.
 
-EVIDENCE GAP: provide the final-device demonstration and actual user feedback on this workflow. Do not claim no competing app offers similar calculations. Comparison with GRID MANAGEMENT PRO remains incomplete because its application source is not currently available in the accessible repositories. Apple may still consider consolidation appropriate.
+EVIDENCE GAP: provide the final-device demonstration and actual user feedback on this workflow. Do not claim no competing app offers similar calculations. A 15 October 2026 GRID MANAGEMENT PRO source snapshot was inspected: standards references, a three-phase current estimate, local planning tasks, a generic commissioning checklist and a StoreKit prototype; no integrated 24-hour PV/BESS dispatch/CSV study was found in that snapshot. Comparison with the currently shipped version remains incomplete. Apple may still consider consolidation appropriate.
 
 ## 4. Beta testing and applied feedback
 
-Build 9 source/icon checks, model checks, Xcode simulator build and one native UI flow passed in run 43317855812 for source commit 9abedca. The UI flow passed in 74.875 seconds with zero failures. It exercised request persistence across relaunch, study navigation/PV slider interaction, checklist toggle/reset and request deletion, and exported genuine iPhone 16 Pro simulator screenshots. Mathematical tests verify AC and stored-energy balances, SOC/power/export bounds and edge cases. A later Home layout fix is being revalidated separately; cite its final run and actual result before submission.
+Build 9 source/icon checks, model checks, Xcode simulator build and one native UI flow passed in run 43317855812 for source commit 9abedca. The UI flow passed in 74.875 seconds with zero failures. It exercised request persistence across relaunch, study navigation/PV slider interaction, checklist toggle/reset and request deletion, and exported genuine iPhone 16 Pro simulator screenshots. Mathematical tests verify AC and stored-energy balances, SOC/power/export bounds and edge cases. The Home layout fix at a8775f7 subsequently passed compilation/model checks and the same UI flow in final run 43319968694 (0 failures, 396.110 seconds). The slower run logged automation idle delays during text entry; real-device responsiveness still needs checking.
 
 App Store Connect showed one installation of TestFlight Build 8, with no recorded feedback values. An installation count is not qualitative feedback. No external tester quote or feedback-driven production change is claimed. Removing embedded web content, correcting the displayed version/privacy controls and correcting a clipped Home subtitle were source/visual audit findings, not external beta feedback.
 
@@ -30,7 +30,7 @@ EVIDENCE GAP: install the final Build 9 candidate on a physical iPhone, record d
 
 The app operates independently and uses its existing App Store record (6831976341 / com.ienergyidata.ios). It is associated with the developer's iEnergy & iData platform. A source comparison with iStar shows a different principal data model: iStar records commissioning dossiers, tagged assets, evidence notes, punch items, milestones and JSON/report exchange; the new iReview43 study models hourly PV, load, battery power, stored MWh, grid exchange and curtailment. Generic project/checklist concepts still overlap in domain.
 
-EVIDENCE GAP: complete comparison with the rest of the developer account before claiming every related product is sufficiently distinct.
+A dated GRID MANAGEMENT PRO source snapshot has a three-phase current estimate and generic standards/planning/checklist areas; iReview43's new constrained 24-hour storage study is absent from that inspected snapshot. This comparison is limited to that historical source, not the current shipped binary. EVIDENCE GAP: complete the current-version/account comparison before claiming every related product is sufficiently distinct.
 
 ## 6. Why functionality is separate
 
