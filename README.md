@@ -1,35 +1,30 @@
-# iEnergy & iData for iPhone
+# iReview43 for iPhone — Build 9 candidate
 
-iPhone application for https://ienergy-idata.com using SwiftUI and WKWebView. Website content stays current without repackaging the app. Includes Home, Back, Reload, pull-to-refresh, sharing and a connection error screen. External links open through iOS. WebKit uses its standard persistent website data store.
+Native offline energy-project enquiries, a commissioning checklist, and a 24-hour PV/BESS dispatch study with SOC integration, one-way efficiency, AC battery rating, an export cap, storage/no-storage comparison, hourly results, local scenario retention and CSV export.
 
-## Identity
-- App Store Connect app: 6831976341
-- Bundle ID: com.ienergyidata.ios
-- Target and scheme: iEnergyIData
-- Minimum iOS: 17
-- Internal TestFlight group: iEnergy Internal Testing
+## Active source and identity
 
-## Build
-Install XcodeGen on a Mac, then run:
-```sh
-xcodegen generate
-xcodebuild -project iEnergyIData.xcodeproj -scheme iEnergyIData -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
-```
+- Active source package on this branch: `iReview43_Build9_Source_Candidate.zip`.
+- App Store Connect: 6831976341.
+- Bundle ID: `com.ienergyidata.ios`.
+- XcodeGen project / scheme: `iReview43`.
+- Platform: iPhone, iOS 17+.
+- Version: 1.0 (9), free.
 
-GitHub Actions generates the app icon and asset catalog before generating the Xcode project. Pushes to main build the simulator app. Simulator compilation succeeded with Xcode 26.3.
+Extract the source archive, enter `iReview43/`, and generate the project with `xcodegen generate`. The root `.github/workflows/ireview43-validation.yml` performs this extraction, compiles on macOS 15 Intel / Xcode 26.3, runs model and native UI checks, and exports genuine simulator screenshots. Its validation job has read-only repository permissions and no signing/upload step.
 
-## TestFlight
-Manually run the iEnergy iOS Build and TestFlight workflow with upload_testflight enabled. The workflow archives without development signing, then uses manual App Store distribution signing at export with the dedicated iEnergyIData_AppStore provisioning profile.
+## Validation
 
-Repository variables:
-- APPLE_TEAM_ID
-- APPSTORE_ISSUER_ID
-- APPSTORE_API_KEY_ID
+Run 43317855812 passed compilation, source/model checks and NativeFlowTests/testNativeFlows (0 failures, 74.875 seconds) for the privacy/version-corrected source at 9abedca. A Home header clipping fix was then made at a8775f7. The final source validation is run 43319968694; use its current actual result when assessing readiness.
 
-Repository secret:
-- APPSTORE_API_PRIVATE_KEY
-- IENERGY_SIGNING_ASSETS (JSON containing encrypted PKCS#12 certificate, its password and the App Store provisioning profile)
+See `iReview43_Build9_Validation.md` and `iReview43_Build9_Apple_Response_DRAFT.md` for the evidence inventory and the outstanding App Review questions. Drafts are internal preparation, not messages already sent to Apple.
 
-Never commit API private keys or signing credentials. The API key is stored as an encrypted repository secret and temporary runner key files, keychain and provisioning profiles are removed after every run.
+## Distribution
 
-App Store Connect processing, an installable TestFlight build, device testing and App Review are separate milestones. Check the current workflow result and App Store Connect before claiming a build is available. Public release also needs final metadata, privacy answers, screenshots, age rating and review.
+Build 9 signing/TestFlight upload requires approval to use the existing iReview43 Apple Distribution material and App Store Connect credentials. No signing workflow has been committed or executed for Build 9. Successful simulator validation, signed IPA export, TestFlight processing, physical-device beta feedback and App Review are separate milestones.
+
+The repository main branch is used for Mercury Auto with a separate Bundle ID. Keep iReview43 changes isolated on `fix/ireview43-apple-review`; deploy from its active source archive.
+
+## User data and assumptions
+
+Drafts, checklist, appearance and one saved scenario remain in local app preferences until explicit sharing/export. The native app includes privacy information and local deletion controls. The optional service website opens in the system browser. The study uses a synthetic clear-day PV curve and constant demand; it is educational, not equipment control or grid-code certification. Initial stored energy can be consumed, and final SOC is not forced to equal the initial value; the comparison is not an economic-savings claim.
