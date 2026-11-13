@@ -21,7 +21,7 @@ jobs:
           kc=root/'audit.keychain-db'
           def run(args):
               r=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-              if r.returncode: raise ValueError('Certificate validation command failed; sensitive details suppressed')
+              if r.returncode: raise ValueError('Certificate stage '+args[1]+' failed with code '+str(r.returncode)+'; sensitive details suppressed')
               return r.stdout
           try:
               a=json.loads(os.environ.pop('SIGNING_ASSETS'))
