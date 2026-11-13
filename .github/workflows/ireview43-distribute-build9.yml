@@ -1,0 +1,138 @@
+name: iReview43 Build 9 signed TestFlight
+on:
+  push:
+    branches: [fix/ireview43-apple-review]
+    paths: [.github/workflows/ireview43-distribute-build9.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ireview43-build9-distribution
+  cancel-in-progress: false
+jobs:
+  distribute:
+    if: github.ref == 'refs/heads/fix/ireview43-apple-review'
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify successful validation and identical source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,subprocess,hashlib
+          from pathlib import Path
+          req=urllib.request.Request('https://api.github.com/repos/valentinnedelcu1974-arch/iEnergy-iData-iOS/actions/runs/43319968694',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(req) as f: r=json.load(f)
+          assert r['head_sha']=='a8775f74b5e530514b0e2d87f2df644d5c005409'
+          assert r['status']=='completed' and r['conclusion']=='success','Validation has not passed'
+          old=subprocess.check_output(['git','show',r['head_sha']+':iReview43_Build9_Source_Candidate.zip'])
+          assert hashlib.sha256(old).digest()==hashlib.sha256(Path('iReview43_Build9_Source_Candidate.zip').read_bytes()).digest(),'Source changed after validation'
+          print('PASS: validated source archive is unchanged')
+          PY
+      - name: Extract isolated iReview43 source
+        run: unzip -oq iReview43_Build9_Source_Candidate.zip -x '.github/*'
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Verify existing signing assets and export IPA
+        working-directory: iReview43
+        env:
+          SIGNING_ASSETS: ${{ secrets.IENERGY_SIGNING_ASSETS }}
+          API_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          python3 - <<'PY'
+          import os,json,base64,subprocess,plistlib,secrets,hashlib,sys
+          from pathlib import Path
+          from datetime import datetime,timezone
+          redactions=[os.environ.get('SIGNING_ASSETS',''),os.environ.get('API_KEY','')]
+          def run(args,label,data=None):
+              r=subprocess.run(args,input=data,capture_output=True)
+              if r.returncode:
+                  print('FAILED: '+label+' (exit '+str(r.returncode)+')')
+                  if args[0] in ['xcodebuild','xcodegen']:
+                      msg=(r.stdout+r.stderr).decode(errors='replace')
+                      for secret in redactions:
+                          if secret: msg=msg.replace(secret,'[REDACTED]')
+                      print('\n'.join(msg.splitlines()[-45:]))
+                  raise SystemExit(1)
+              return r.stdout
+          def main():
+              missing=[n for n in ['SIGNING_ASSETS','API_KEY','KEY_ID','ISSUER_ID','TEAM_ID'] if not os.environ.get(n)]
+              if missing: raise RuntimeError('Missing credential names: '+', '.join(missing))
+              assert os.environ['TEAM_ID']=='F3639777XM','Wrong Apple team'
+              a=json.loads(os.environ['SIGNING_ASSETS']);redactions.extend([a.get('password',''),a.get('p12','')])
+              temp=Path(os.environ['RUNNER_TEMP'])/'ireview43-build9-signing';temp.mkdir(mode=0o700,exist_ok=True)
+              profile=base64.b64decode(a['profile'])
+              meta=plistlib.loads(run(['security','cms','-D'],'decode profile',profile))
+              assert meta['Entitlements']['application-identifier']=='F3639777XM.com.ienergyidata.ios','Wrong app profile'
+              assert meta['ExpirationDate']>datetime.now(timezone.utc).replace(tzinfo=None),'Expired profile'
+              assert not meta['Entitlements'].get('get-task-allow',False),'Development profile'
+              assert not meta.get('ProvisionedDevices') and not meta.get('ProvisionsAllDevices'),'Not an App Store profile'
+              uuid=meta['UUID'];assert all(c in '0123456789abcdefABCDEF-' for c in uuid),'Invalid profile UUID'
+              fingerprint=a['certificate_sha1'];assert len(fingerprint)==40 and all(c in '0123456789abcdefABCDEF' for c in fingerprint),'Invalid certificate fingerprint'
+              assert any(hashlib.sha1(c).hexdigest().upper()==fingerprint.upper() for c in meta['DeveloperCertificates']),'Certificate not in app profile'
+              p12=temp/'distribution.p12';p12.write_bytes(base64.b64decode(a['p12']));p12.chmod(0o600)
+              keychain=str(temp/'signing.keychain-db');keypass=secrets.token_urlsafe(32);redactions.append(keypass)
+              with open(os.environ['GITHUB_ENV'],'a') as f: f.write('IREVIEW9_PROFILE_UUID='+uuid+'\nIREVIEW9_KEYCHAIN='+keychain+'\n')
+              run(['security','create-keychain','-p',keypass,keychain],'create temporary keychain')
+              run(['security','set-keychain-settings','-lut','21600',keychain],'configure keychain')
+              run(['security','unlock-keychain','-p',keypass,keychain],'unlock keychain')
+              run(['security','import',str(p12),'-P',a['password'],'-T','/usr/bin/codesign','-T','/usr/bin/security','-t','cert','-f','pkcs12','-k',keychain],'import existing distribution identity')
+              p12.unlink()
+              run(['security','set-key-partition-list','-S','apple-tool:,apple:,codesign:','-s','-k',keypass,keychain],'configure signing access')
+              run(['security','list-keychains','-d','user','-s',keychain],'select temporary keychain')
+              ids=run(['security','find-identity','-v','-p','codesigning',keychain],'verify valid signing identity').decode()
+              assert fingerprint.upper() in ids.upper(),'Signing certificate unavailable or invalid'
+              for folder in [Path.home()/'Library/MobileDevice/Provisioning Profiles',Path.home()/'Library/Developer/Xcode/UserData/Provisioning Profiles']:
+                  folder.mkdir(parents=True,exist_ok=True);(folder/(uuid+'.mobileprovision')).write_bytes(profile)
+              options={'method':'app-store-connect','destination':'export','signingStyle':'manual','teamID':'F3639777XM','signingCertificate':fingerprint,'provisioningProfiles':{'com.ienergyidata.ios':meta['Name']}}
+              (temp/'ExportOptions.plist').write_bytes(plistlib.dumps(options))
+              print('PASS: existing identity and App Store profile match iReview43')
+              run(['xcodegen','generate'],'generate Xcode project')
+              archive=temp/'iReview43.xcarchive'
+              run(['xcodebuild','-project','iReview43.xcodeproj','-scheme','iReview43','-configuration','Release','-destination','generic/platform=iOS','-archivePath',str(archive),'CURRENT_PROJECT_VERSION=9','MARKETING_VERSION=1.0','CODE_SIGNING_ALLOWED=NO','archive'],'archive iReview43 1.0 (9)')
+              run(['xcodebuild','-exportArchive','-archivePath',str(archive),'-exportPath',str(temp/'export'),'-exportOptionsPlist',str(temp/'ExportOptions.plist')],'export signed IPA')
+              ipa=temp/'export/iReview43.ipa';assert ipa.is_file(),'IPA missing'
+              import zipfile
+              with zipfile.ZipFile(ipa) as z:
+                  n=next(n for n in z.namelist() if n.startswith('Payload/') and n.count('/')==2 and n.endswith('/Info.plist'))
+                  info=plistlib.loads(z.read(n))
+                  assert info['CFBundleIdentifier']=='com.ienergyidata.ios' and info['CFBundleVersion']=='9','Wrong exported IPA identity'
+              with open(os.environ['GITHUB_ENV'],'a') as f:f.write('IREVIEW9_IPA='+str(ipa)+'\n')
+              print('PASS: signed iReview43 1.0 (9) IPA exported')
+          try: main()
+          except Exception as e:
+              print('FAILED signing/export preflight: '+type(e).__name__)
+              if isinstance(e,(AssertionError,RuntimeError)):
+                  msg=str(e)
+                  for secret in redactions:
+                      if secret: msg=msg.replace(secret,'[REDACTED]')
+                  print(msg)
+              sys.exit(1)
+          PY
+      - name: Upload only iReview43 Build 9 to TestFlight
+        uses: apple-actions/upload-testflight-build@v5
+        with:
+          app-path: ${{ env.IREVIEW9_IPA }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "$IREVIEW9_KEYCHAIN" ]; then security delete-keychain "$IREVIEW9_KEYCHAIN" || true; fi
+          if [ -n "$IREVIEW9_PROFILE_UUID" ]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IREVIEW9_PROFILE_UUID.mobileprovision"
+            rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$IREVIEW9_PROFILE_UUID.mobileprovision"
+          fi
+          rm -rf "$RUNNER_TEMP/ireview43-build9-signing"
